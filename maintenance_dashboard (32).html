@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maintenance Expense Dashboard</title>
+<style>
+  :root {
+    --bg:#f4f5f7;--surface:#ffffff;--surface2:#f0f1f4;--border:#e2e4ea;
+    --border2:#c8cad4;--text:#0f1923;--text2:#5a6072;--text3:#9aa0b0;
+    --green:#0a7c42;--green-bg:#e6f7ef;--red:#c0392b;--red-bg:#fdf0ef;
+    --navy:#0f1923;--navy2:#1a2740;--accent:#1a6ef5;
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --mono:'JetBrains Mono','Fira Code','Courier New',monospace;
+    --radius:6px;--radius-lg:10px;
+  }
+  @media(prefers-color-scheme:dark){
+    :root{
+      --bg:#0d1117;--surface:#161b22;--surface2:#1e242d;--border:#2a3040;
+      --border2:#3a4255;--text:#e6eaf2;--text2:#7d8799;--text3:#4a5266;
+      --green:#2ecc71;--green-bg:#0a2e1a;--red:#e74c3c;--red-bg:#2a0e0b;
+      --navy:#1a2535;--navy2:#243048;--accent:#4d8ef5;
+    }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh}
+  .page{max-width:1200px;margin:0 auto;padding:24px 24px 60px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
+  .topbar-left h1{font-size:18px;font-weight:700;letter-spacing:-.3px;color:var(--text)}
+  .topbar-left p{font-size:11px;color:var(--text2);margin-top:2px}
+  .topbar-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .badge{font-size:11px;padding:3px 10px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);white-space:nowrap}
+  .badge.live{background:var(--green-bg);color:var(--green);border-color:var(--green)}
+  .btn{font-size:12px;padding:6px 14px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--surface);color:var(--text);cursor:pointer;font-family:var(--font);transition:background .15s;font-weight:500}
+  .btn:hover{background:var(--surface2)}
+  .btn.primary{background:var(--navy);color:#fff;border-color:var(--navy);font-weight:600;letter-spacing:.02em}
+  .btn.primary:hover{background:var(--navy2)}
+  /* Section headers — dark navy bar like screenshot */
+  .section-header{background:var(--navy);color:#fff;padding:9px 16px;border-radius:var(--radius) var(--radius) 0 0;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:0}
+  /* Two-column MTD/YTD row */
+  .periods-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+  @media(max-width:900px){.periods-row{grid-template-columns:1fr}}
+  .period-block{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+  .period-block .section-header{border-radius:0}
+  .period-inner{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+  .kpi-card{padding:14px 16px;border-right:1px solid var(--border)}
+  .kpi-card:last-child{border-right:none}
+  .kpi-label{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
+  .kpi-value{font-size:22px;font-weight:700;letter-spacing:-.5px;line-height:1;color:var(--text)}
+  .kpi-sub{font-size:11px;margin-top:5px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+  .sub-label{color:var(--text3);font-size:10px}
+  .pill{display:inline-flex;align-items:center;font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px}
+  .pill.fav{background:var(--green-bg);color:var(--green)}
+  .pill.unfav{background:var(--red-bg);color:var(--red)}
+  .pill.neu{background:var(--surface2);color:var(--text2)}
+  .fav{color:var(--green)}.unfav{color:var(--red)}.neu{color:var(--text2)}
+  .hr{height:1px;background:var(--border);margin:20px 0}
+  .chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:20px}
+  .chart-inner{padding:0 16px 16px}
+  .chart-header{display:flex;align-items:center;justify-content:space-between;padding:0 0 14px;flex-wrap:wrap;gap:10px}
+  .chart-title{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text3)}
+  .chart-legend{display:flex;gap:16px;flex-wrap:wrap}
+  .chart-legend span{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)}
+  .swatch{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+  .chart-wrap{position:relative;width:100%;height:240px}
+  .table-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:12px}
+  .table-header{padding:9px 16px;border-bottom:1px solid var(--border);background:var(--navy)}
+  .table-header .chart-title{color:#fff}
+  .table-wrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  thead th{padding:8px 14px;text-align:right;font-weight:600;color:var(--text2);font-size:11px;white-space:nowrap;background:var(--surface2);border-bottom:1px solid var(--border)}
+  thead th:first-child{text-align:left}
+  tbody td{padding:8px 14px;text-align:right;border-bottom:1px solid var(--border);color:var(--text)}
+  tbody td:first-child{text-align:left;font-weight:500}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover td{background:var(--surface2)}
+  tfoot td{padding:9px 14px;text-align:right;font-weight:700;border-top:2px solid var(--border2);font-size:12px;background:var(--surface2)}
+  tfoot td:first-child{text-align:left}
+  .state-box{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:16px;text-align:center}
+  .spinner{width:36px;height:36px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .state-title{font-size:15px;font-weight:600}
+  .state-sub{font-size:12px;color:var(--text2);max-width:480px;line-height:1.7}
+  .err-box{background:var(--red-bg);border:1px solid var(--red);border-radius:var(--radius-lg);padding:16px 20px;max-width:620px;width:100%;text-align:left}
+  .err-title{font-size:13px;font-weight:600;color:var(--red);margin-bottom:8px}
+  .err-detail{font-size:11px;color:var(--text2);font-family:var(--mono);white-space:pre-wrap;word-break:break-word;line-height:1.6}
+  .diag-box{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;max-width:620px;width:100%;text-align:left}
+  .diag-title{font-size:11px;font-weight:600;margin-bottom:8px;color:var(--text2)}
+  .diag-row{display:flex;align-items:flex-start;gap:8px;font-size:11px;margin-bottom:5px;line-height:1.5}
+  .ok{color:var(--green)}.fail{color:var(--red)}.wait{color:var(--text3)}
+  .note{font-size:11px;color:var(--text3);line-height:1.7;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="page"><div id="app">
+  <div class="state-box">
+    <div class="spinner"></div>
+    <div class="state-title">Loading your data…</div>
+    <div class="state-sub">Fetching from Google Sheets</div>
+    <div id="diag-panel"></div>
+  </div>
+</div></div>
+<script>
+const ACT_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS0JSwcqFFb1AUVuIZMm8gl6Pt9kbF6PeXyFfbDDUd9s2mi-AyFSvwoyQ0xbBNw88N5yxpSeEGzvUe9/pub?gid=0&single=true&output=csv';
+const PLAN_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTnL1ttEqbnFaXam8MFUFFI2uPl0qNEvq6WoeLWwU8I3aQaMrNnEw1a-nel2KCK8fRPsjjSDycjDoIf/pub?gid=0&single=true&output=csv';
+const PROXIES = [
+  u => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
+  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+];
+const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let chartInst = null;
+const diagState = {};
+
+function updateDiag(label, cls, msg) {
+  diagState[label] = {cls, msg};
+  const el = document.getElementById('diag-panel');
+  if (!el) return;
+  el.innerHTML = `<div class="diag-box"><div class="diag-title">Connection log</div>${
+    Object.entries(diagState).map(([k,v])=>`<div class="diag-row">
+      <span class="${v.cls}" style="flex-shrink:0;width:14px">${v.cls==='ok'?'✓':v.cls==='fail'?'✗':'…'}</span>
+      <span><b>${k}:</b> <span style="color:var(--text2)">${v.msg}</span></span>
+    </div>`).join('')
+  }</div>`;
+}
+
+// Convert 1-based column index to spreadsheet letter (1=A, 27=AA)
+function colToLetter(n) {
+  let s = '';
+  while (n > 0) { s = String.fromCharCode(65 + (n-1) % 26) + s; n = Math.floor((n-1)/26); }
+  return s;
+}
+
+async function rawFetch(url) {
+  async function attempt(u) {
+    const r = await fetch(u, {cache:'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const t = await r.text();
+    if (!t.trim() || t.trim()[0] === '<') throw new Error('Got HTML not CSV');
+    return t;
+  }
+  try { return await attempt(url); }
+  catch(e0) {
+    for (let i = 0; i < PROXIES.length; i++) {
+      try { return await attempt(PROXIES[i](url)); }
+      catch(ep) {
+        if (i === PROXIES.length - 1)
+          throw new Error(`Direct: ${e0.message} | Proxy: ${ep.message}`);
+      }
+    }
+  }
+}
+
+// Key strategy: fetch ONLY the two columns we need (date + amount).
+// A single-column CSV is tiny (~100KB for 9000+ rows) so Google imposes
+// no row limit. This scales indefinitely as the sheet grows.
+async function fetchCSV(url, label) {
+  updateDiag(label, 'wait', 'Reading column headers…');
+
+  // Step 1: fetch just the header row to find column positions
+  let hdrTxt;
+  try { hdrTxt = await rawFetch(url + '&range=1:1'); }
+  catch(e) { updateDiag(label,'fail',e.message); throw new Error(`${label}: ${e.message}`); }
+
+  const allFields = parseCSV(hdrTxt).fields;
+  if (!allFields.length) throw new Error(`${label}: empty header`);
+
+  function findIdx(exact, fuzzy) {
+    for (const m of exact) {
+      const i = allFields.findIndex(f => f && f.toLowerCase().trim() === m);
+      if (i >= 0) return i + 1;
+    }
+    for (const p of fuzzy) {
+      const i = allFields.findIndex(f => f && f.toLowerCase().replace(/[\s_\-\.()]/g,'').includes(p));
+      if (i >= 0) return i + 1;
+    }
+    return -1;
+  }
+
+  const dateIdx = findIdx(
+    ['date','row labels'],
+    ['date','day','period','time','month','week']
+  );
+  const amtIdx = findIdx(
+    ['parts_subtotal','sum of parts_subtotal','amount'],
+    ['partssubtotal','parts','maintenance','maint','expense','cost','amt']
+  );
+
+  if (dateIdx <= 0 || amtIdx <= 0)
+    throw new Error(`${label}: columns not found (date=${dateIdx}, amt=${amtIdx}). Headers: ${allFields.join(' | ')}`);
+
+  const dateField  = allFields[dateIdx - 1];
+  const amtField   = allFields[amtIdx  - 1];
+  const dateLetter = colToLetter(dateIdx);
+  const amtLetter  = colToLetter(amtIdx);
+
+  updateDiag(label, 'wait',
+    `Fetching col ${dateLetter} ("${dateField}") + col ${amtLetter} ("${amtField}") — all rows…`);
+
+  // Step 2: fetch just those two columns in parallel (no row limit on single columns)
+  let dateTxt, amtTxt;
+  try {
+    [dateTxt, amtTxt] = await Promise.all([
+      rawFetch(`${url}&range=${dateLetter}:${dateLetter}`),
+      rawFetch(`${url}&range=${amtLetter}:${amtLetter}`)
+    ]);
+  } catch(e) {
+    updateDiag(label,'fail',e.message);
+    throw new Error(`${label}: ${e.message}`);
+  }
+
+  // Step 3: parse single-column CSVs (each returns just that column, header in row 1)
+  function parseSingleCol(txt) {
+    return txt.trim().split(/\r?\n/).slice(1).map(line => {
+      line = line.trim();
+      if (line.startsWith('"') && line.endsWith('"'))
+        line = line.slice(1, -1).replace(/""/g, '"');
+      return line;
+    });
+  }
+
+  const dateVals = parseSingleCol(dateTxt);
+  const amtVals  = parseSingleCol(amtTxt);
+  const n = Math.min(dateVals.length, amtVals.length);
+
+  // Step 4: zip into row objects, skip footer rows (Grand Total etc.)
+  const data = [];
+  for (let i = 0; i < n; i++) {
+    const dv = dateVals[i];
+    if (!dv || dv.toLowerCase().includes('grand total') || dv.toLowerCase() === 'total') continue;
+    data.push({ [dateField]: dv, [amtField]: amtVals[i] || '' });
+  }
+
+  updateDiag(label, 'ok', `✓ ${data.length.toLocaleString()} rows`);
+  return { fields: [dateField, amtField], data };
+}
+
+
+function parseCSV(txt) {
+  const lines = txt.trim().split(/\r?\n/);
+  function split(l) {
+    const out=[]; let cur='', q=false;
+    for(let i=0;i<l.length;i++){
+      const c=l[i];
+      if(c==='"'){if(q&&l[i+1]==='"'){cur+='"';i++;}else q=!q;}
+      else if(c===','&&!q){out.push(cur.trim());cur='';}
+      else cur+=c;
+    }
+    out.push(cur.trim());
+    return out;
+  }
+  const fields = split(lines[0]);
+  const data = lines.slice(1).map(l=>{
+    const v=split(l); const o={};
+    fields.forEach((f,i)=>o[f]=(v[i]??'').trim());
+    return o;
+  }).filter(r=>Object.values(r).some(v=>v!==''));
+  return {fields, data};
+}
+
+function detect(fields, kws) {
+  for(const k of kws){
+    const f=fields.find(f=>f&&f.toLowerCase().replace(/[\s_\-\.()]/g,'').includes(k));
+    if(f) return f;
+  }
+  return null;
+}
+const MONTH_NAMES={january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,september:8,october:9,november:10,december:11,jan:0,feb:1,mar:2,apr:3,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+function pDate(v){
+  if(!v&&v!==0) return null;
+  const s=String(v).trim();
+  if(!s||s==='-') return null;
+
+  // For ISO timestamps like "2026-03-31T00:00:00.000-06:00" or "2026-03-31T06:00:00Z"
+  // extract just the YYYY-MM-DD part to avoid timezone shifting across month boundaries
+  const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(isoMatch) {
+    const [,y,m,d] = isoMatch.map(Number);
+    if(y>2000&&y<2100&&m>=1&&m<=12&&d>=1&&d<=31)
+      return new Date(y, m-1, d);
+  }
+
+  const sl=s.toLowerCase();
+  // "January 2026" or "Jan 2026" or "January-2026"
+  const mnMatch=sl.match(/^([a-z]+)[\s\-]+(\d{4})$/);
+  if(mnMatch){const mo=MONTH_NAMES[mnMatch[1]];if(mo!==undefined)return new Date(parseInt(mnMatch[2]),mo,1);}
+  // "Jan-26"
+  const mnShort=sl.match(/^([a-z]+)[\-\/](\d{2,4})$/);
+  if(mnShort){const mo=MONTH_NAMES[mnShort[1]];if(mo!==undefined){let yr=parseInt(mnShort[2]);if(yr<100)yr+=2000;return new Date(yr,mo,1);}}
+  // "2026-01" or "01/2026"
+  const ymMatch=s.match(/^(\d{4})[\-\/](\d{1,2})$/);
+  if(ymMatch)return new Date(parseInt(ymMatch[1]),parseInt(ymMatch[2])-1,1);
+  const mdyShort=s.match(/^(\d{1,2})\/(\d{4})$/);
+  if(mdyShort)return new Date(parseInt(mdyShort[2]),parseInt(mdyShort[1])-1,1);
+  // Month name alone
+  if(MONTH_NAMES[sl]!==undefined)return new Date(new Date().getFullYear(),MONTH_NAMES[sl],1);
+  // Numeric splits M/D/Y
+  const p=s.split(/[\/\-\.\s]/);
+  if(p.length>=3){
+    const [a,b,c]=p.map(x=>parseInt(x,10));
+    const t=[new Date(c,a-1,b),new Date(a,b-1,c),new Date(c,b-1,a)];
+    const ok=t.find(x=>!isNaN(x)&&x.getFullYear()>2000&&x.getFullYear()<2100);
+    if(ok)return ok;
+  }
+  return null;
+}
+function pNum(v){
+  if(v===null||v===undefined||v==='') return null;
+  const n=parseFloat(String(v).replace(/[$,\s%]/g,'').replace(/\(([^)]+)\)/,'-$1'));
+  return isNaN(n)?null:n;
+}
+function fmt(n){
+  if(n===null||n===undefined) return '—';
+  const a=Math.abs(n);
+  if(a>=1e6) return '$'+(n/1e6).toFixed(2)+'M';
+  if(a>=1000) return '$'+(n/1000).toFixed(1)+'K';
+  return '$'+n.toFixed(0);
+}
+function fmtF(n){ if(n===null||n===undefined) return '—'; return '$'+Math.round(n).toLocaleString(); }
+function pct(n){ if(n===null||!isFinite(n)) return '—'; return (n>=0?'+':'')+(n*100).toFixed(1)+'%'; }
+function vc(v){ if(v===null) return 'neu'; return v<=0?'fav':'unfav'; }
+function daysIn(y,m){ return new Date(y,m+1,0).getDate(); }
+function pill(v){if(v===null)return'<span class="neu">—</span>';const c=vc(v);return`<span class="pill ${c}">${v>=0?'+':''}${fmt(v)}</span>`;}
+function pillP(n){if(n===null||!isFinite(n))return'<span class="neu">—</span>';const c=vc(n);return`<span class="pill ${c}">${pct(n)}</span>`;}
+function vc2(v){if(v===null)return'—';const c=vc(v);return`<span class="${c}">${v>=0?'+':''}${fmt(v)}</span>`;}
+function pc2(n){if(n===null||!isFinite(n))return'—';const c=vc(n);return`<span class="${c}">${pct(n)}</span>`;}
+
+function renderDash(planR, actR) {
+  if(chartInst){chartInst.destroy();chartInst=null;}
+  const app=document.getElementById('app');
+  const pH=planR.fields, aH=actR.fields;
+
+  const pDC = pH.find(f=>f&&f.toLowerCase()==='month')
+    || pH.find(f=>f&&f.toLowerCase()==='period')
+    || detect(pH,['date','mo','time','week','day']);
+  const pAC = pH.find(f=>f&&f.toLowerCase()==='amount')
+    || pH.find(f=>f&&f.toLowerCase()==='totalamount')
+    || pH.find(f=>f&&f.toLowerCase()==='total_amount')
+    || detect(pH,['maintenance','maint','mex','budget','plan','amt','cost','expense','spend','value','total']);
+  const aDC = aH.find(f=>f&&f.toLowerCase()==='date')
+    || aH.find(f=>f&&f.toLowerCase()==='row labels')
+    || aH.find(f=>f&&f.toLowerCase()==='rowlabels')
+    || detect(aH,['date','day','period','time','month','week','label']);
+  const aAC = aH.find(f=>f&&f.toLowerCase()==='parts_subtotal')
+    || aH.find(f=>f&&f.toLowerCase()==='sum of parts_subtotal')
+    || aH.find(f=>f&&['sum of parts','sumofparts','partssubtotal','parts_subtotal'].some(k=>f.toLowerCase().replace(/[\s_]/g,'').includes(k.replace(/[\s_]/g,''))))
+    || aH.find(f=>f&&f.toLowerCase()==='parts_cost')
+    || aH.find(f=>f&&f.toLowerCase()==='total_amount')
+    || detect(aH,['parts','maintenance','maint','mex','actualcost','spend','expense','cost']);
+  const aLYC=detect(aH,['lastyear','prioryear','prevyear','ly','py','2025','lastyr','prior']);
+
+  if(!pDC||!pAC){showErr('Plan: cannot identify columns',`Headers: ${pH.join(' | ')}`,planR.data.slice(0,3),null);return;}
+  if(!aDC||!aAC){showErr('Actuals: cannot identify columns',`Headers: ${aH.join(' | ')}`,null,actR.data.slice(0,3));return;}
+
+  const planRows=planR.data.map(r=>({date:pDate(r[pDC]),amt:pNum(r[pAC])})).filter(r=>r.date&&r.amt!==null).sort((a,b)=>a.date-b.date);
+
+  // Keep every row with a valid date — treat missing/blank parts_subtotal as $0
+  const actRows=actR.data
+    .filter(r=>{ const v=String(r[aDC]||'').toLowerCase().trim(); return v!=='grand total'&&v!=='total'&&v!==''; })
+    .map(r=>{ const d=pDate(r[aDC]); const a=pNum(r[aAC]); return {date:d, amt: a!==null ? a : 0}; })
+    .filter(r=>r.date!==null)
+    .sort((a,b)=>a.date-b.date);
+
+  const totalRawRows=actRows.length;
+  const totalRawSum=actRows.reduce((s,r)=>s+r.amt,0);
+
+  if(!actRows.length){showErr('No actuals rows parsed',`date="${aDC}" amt="${aAC}"\nRow 0: ${JSON.stringify(actR.data[0])}`,null,actR.data.slice(0,5));return;}
+  if(!planRows.length){showErr('No plan rows parsed',`date="${pDC}" amt="${pAC}"\nRow 0: ${JSON.stringify(planR.data[0])}`,planR.data.slice(0,5),null);return;}
+
+  const last=actRows[actRows.length-1].date;
+  const yr=last.getFullYear(),mo=last.getMonth(),day=last.getDate(),totalDays=daysIn(yr,mo);
+
+  const act26=actRows.filter(r=>r.date.getFullYear()===yr);
+  const actMTD=act26.filter(r=>r.date.getMonth()===mo);
+
+  const mtdAct=actMTD.reduce((s,r)=>s+r.amt,0);
+  const ytdAct=act26.reduce((s,r)=>s+r.amt,0);
+
+  // Prior year window: Jan 1 (yr-1) through today - 365 days (dynamic)
+  const today=new Date();
+  const pyEnd=new Date(today.getTime()-365*24*60*60*1000); // today minus 365
+  const pyStart=new Date(yr-1,0,1);                         // Jan 1 of prior year
+  const actPY=actRows.filter(r=>r.date>=pyStart&&r.date<=pyEnd);
+
+  // MTD PY: same calendar month as pyEnd, up to same day-of-month
+  const pyMo=pyEnd.getMonth(), pyDay=pyEnd.getDate();
+  const mtdPYrows=actPY.filter(r=>r.date.getMonth()===pyMo&&r.date.getDate()<=pyDay);
+  const ytdPYrows=actPY; // already bounded Jan1(yr-1) → pyEnd
+
+  let mtdLY=null,ytdLY=null;
+  if(mtdPYrows.length) mtdLY=mtdPYrows.reduce((s,r)=>s+r.amt,0);
+  if(ytdPYrows.length) ytdLY=ytdPYrows.reduce((s,r)=>s+r.amt,0);
+
+  function mPlan(y,m){
+    const h=planRows.find(r=>r.date.getFullYear()===y&&r.date.getMonth()===m);
+    if(h) return h.amt;
+    const yR=planRows.filter(r=>r.date.getFullYear()===y);
+    if(yR.length===12) return yR[m]?.amt??null;
+    return null;
+  }
+  const proMTD=(y,m,d)=>{const p=mPlan(y,m);return p?(p/daysIn(y,m))*d:null;};
+  const proYTD=(y,m,d)=>{
+    let t=0,any=false;
+    for(let i=0;i<m;i++){const p=mPlan(y,i);if(p){t+=p;any=true;}}
+    const cp=mPlan(y,m);if(cp){t+=(cp/daysIn(y,m))*d;any=true;}
+    return any?t:null;
+  };
+
+  const mtdPlan=proMTD(yr,mo,day),ytdPlan=proYTD(yr,mo,day);
+  const mtdVsP=mtdPlan!==null?mtdAct-mtdPlan:null;
+  const ytdVsP=ytdPlan!==null?ytdAct-ytdPlan:null;
+  const mtdVsLY=mtdLY!==null?mtdAct-mtdLY:null;
+  const ytdVsLY=ytdLY!==null?ytdAct-ytdLY:null;
+
+  // Monthly chart data (Jan → current month)
+  const chartLabels=[], chartActual=[], chartPlan=[], chartPY=[];
+  for(let m=0;m<=mo;m++){
+    const isCur=m===mo;
+    chartLabels.push(MO[m]);
+    const mA=act26.filter(r=>r.date.getMonth()===m).reduce((s,r)=>s+r.amt,0);
+    chartActual.push(parseFloat(mA.toFixed(2)));
+    const mp=mPlan(yr,m);
+    const dU=isCur?day:daysIn(yr,m);
+    chartPlan.push(mp?parseFloat(((mp/daysIn(yr,m))*dU).toFixed(2)):null);
+    // PY: same month in prior year, bounded by pyEnd
+    const pyMoRows=actPY.filter(r=>r.date.getMonth()===m&&(!isCur||r.date.getDate()<=pyDay));
+    chartPY.push(pyMoRows.length?parseFloat(pyMoRows.reduce((s,r)=>s+r.amt,0).toFixed(2)):null);
+  }
+
+  const mRows=[];
+  for(let m=0;m<=mo;m++){
+    const isCur=m===mo;
+    const mA=act26.filter(r=>r.date.getMonth()===m).reduce((s,r)=>s+r.amt,0);
+    const dU=isCur?day:daysIn(yr,m);
+    const mp=mPlan(yr,m);
+    const mPr=mp?(mp/daysIn(yr,m))*dU:null;
+    // PY: same month, bounded by pyEnd day for current month
+    const pyR=actPY.filter(r=>r.date.getMonth()===m&&(!isCur||r.date.getDate()<=pyDay));
+    const mPY=pyR.length?pyR.reduce((s,r)=>s+r.amt,0):null;
+    mRows.push({l:MO[m]+(isCur?'*':''),a:mA,p:mPr,py:mPY,vP:mPr!==null?mA-mPr:null,vL:mPY!==null?mA-mPY:null,vPP:mPr!==null?(mA-mPr)/mPr:null});
+  }
+
+  const pyEndStr=`${MO[pyEnd.getMonth()]} ${pyEnd.getDate()}, ${yr-1}`;
+  const pyStartStr=`Jan 1, ${yr-1}`;
+  const dark=window.matchMedia('(prefers-color-scheme:dark)').matches;
+  const cActual = dark?'#f1f5f9':'#0f2744';        // near-black / near-white — dominant
+  const cPlan   = dark?'#38bdf8':'#0369a1';         // sky blue — clearly different
+  const cPY     = dark?'#fb923c':'#c2410c';         // vivid orange — maximally distinct
+  const cGreen  = dark?'#22c55e':'#16a34a';
+  const cRed    = dark?'#ef4444':'#dc2626';
+  const cGreenB = dark?'rgba(34,197,94,.75)' :'rgba(22,163,74,.75)';
+  const cRedB   = dark?'rgba(239,68,68,.75)' :'rgba(220,38,38,.75)';
+  const cT=dark?'#4a5266':'#9aa0b0', cG=dark?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)';
+
+  // Cumulative chart data
+  const cumActual=[], cumPlan=[], cumPY=[], cumVariance=[];
+  let rA=0, rP=0;
+  for(let i=0;i<chartActual.length;i++){
+    rA+=chartActual[i]||0;
+    cumActual.push(parseFloat(rA.toFixed(2)));
+    if(chartPlan[i]!=null){ rP+=chartPlan[i]; cumPlan.push(parseFloat(rP.toFixed(2))); }
+    else cumPlan.push(null);
+    const pySum = chartPY.slice(0,i+1).reduce((s,v)=>s+(v||0),0);
+    cumPY.push(chartPY[i]!=null ? parseFloat(pySum.toFixed(2)) : null);
+    cumVariance.push(cumPlan[i]!=null ? parseFloat((rA-rP).toFixed(2)) : null);
+  }
+  const chartVariance = chartActual.map((a,i)=>
+    a!=null&&chartPlan[i]!=null ? parseFloat((a-chartPlan[i]).toFixed(2)) : null);
+
+  app.innerHTML=`
+  <div class="topbar">
+    <div class="topbar-left"><h1>Parts Expense Dashboard</h1><p>F${yr} actuals vs plan vs prior year</p></div>
+    <div class="topbar-right">
+      <span class="badge live">● Live</span>
+      <span class="badge">Through ${MO[mo]} ${day}, ${yr} · Day ${day}/${totalDays}</span>
+      <button class="btn primary" onclick="initDash()">↻ Refresh</button>
+    </div>
+  </div>
+
+  __TRUNC_WARNING__
+
+  <div class="periods-row">
+    <!-- MTD -->
+    <div class="period-block">
+      <div class="section-header">Month-to-date &nbsp;·&nbsp; ${MO[mo]} ${yr} &nbsp;·&nbsp; Day ${day} of ${totalDays}</div>
+      <div class="period-inner">
+        <div class="kpi-card">
+          <div class="kpi-label">Actual</div>
+          <div class="kpi-value">${fmtF(mtdAct)}</div>
+          <div class="kpi-sub"><span class="sub-label">${day} days</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Plan (pro-rated)</div>
+          <div class="kpi-value">${fmtF(mtdPlan)}</div>
+          <div class="kpi-sub"><span class="sub-label">÷${totalDays}d × ${day}d</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">vs Plan</div>
+          <div class="kpi-value ${vc(mtdVsP)}">${fmt(mtdVsP)}</div>
+          <div class="kpi-sub">${pillP(mtdVsP&&mtdPlan?mtdVsP/mtdPlan:null)} <span class="sub-label">of plan</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">vs Prior year</div>
+          <div class="kpi-value ${vc(mtdVsLY)}">${fmt(mtdVsLY)}</div>
+          <div class="kpi-sub">${mtdLY!==null?pillP(mtdVsLY/mtdLY)+` <span class="sub-label">${MO[pyMo]} ${yr-1}</span>`:'<span class="neu">No PY data</span>'}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- YTD -->
+    <div class="period-block">
+      <div class="section-header">Year-to-date &nbsp;·&nbsp; Jan 1 – ${MO[mo]} ${day}, ${yr}</div>
+      <div class="period-inner">
+        <div class="kpi-card">
+          <div class="kpi-label">Actual</div>
+          <div class="kpi-value">${fmtF(ytdAct)}</div>
+          <div class="kpi-sub"><span class="sub-label">Jan–${MO[mo]} ${day}</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Plan (pro-rated)</div>
+          <div class="kpi-value">${fmtF(ytdPlan)}</div>
+          <div class="kpi-sub"><span class="sub-label">Full months + partial ${MO[mo]}</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">vs Plan</div>
+          <div class="kpi-value ${vc(ytdVsP)}">${fmt(ytdVsP)}</div>
+          <div class="kpi-sub">${pillP(ytdVsP&&ytdPlan?ytdVsP/ytdPlan:null)} <span class="sub-label">of plan</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">vs Prior year</div>
+          <div class="kpi-value ${vc(ytdVsLY)}">${fmt(ytdVsLY)}</div>
+          <div class="kpi-sub">${ytdLY!==null?pillP(ytdVsLY/ytdLY)+` <span class="sub-label">${pyStartStr}–${pyEndStr}</span>`:'<span class="neu">No PY data</span>'}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+
+    <div class="chart-card">
+      <div class="section-header">Monthly parts spend — ${yr} YTD</div>
+      <div class="chart-inner">
+        <!-- Line chart with its own legend -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0 8px;border-bottom:1px solid var(--border)">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">Spend by month</span>
+          <div class="chart-legend">
+            <span><span style="width:18px;height:2px;display:inline-block;background:${cActual};vertical-align:middle;border-radius:1px"></span>Actual</span>
+            <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cPlan};vertical-align:middle"></span>Plan</span>
+            <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cPY};vertical-align:middle"></span>Prior year</span>
+          </div>
+        </div>
+        <div style="position:relative;width:100%;height:190px;padding-top:8px"><canvas id="mc-lines"></canvas></div>
+        <!-- Variance section with its own label -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0 4px;border-top:2px dashed var(--border2);margin-top:4px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">vs Plan variance</span>
+          <div style="font-size:10px;color:var(--text3)">
+            <span style="color:${cGreen};font-weight:700">▼ under budget</span>
+            &nbsp;&nbsp;
+            <span style="color:${cRed};font-weight:700">▲ over budget</span>
+          </div>
+        </div>
+        <div style="position:relative;width:100%;height:75px"><canvas id="mc-variance"></canvas></div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="section-header">Cumulative YTD parts spend — ${yr}</div>
+      <div class="chart-inner">
+        <!-- Line chart with its own legend -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0 8px;border-bottom:1px solid var(--border)">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">Running total</span>
+          <div class="chart-legend">
+            <span><span style="width:18px;height:2px;display:inline-block;background:${cActual};vertical-align:middle;border-radius:1px"></span>Actual</span>
+            <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cPlan};vertical-align:middle"></span>Plan</span>
+            <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cPY};vertical-align:middle"></span>Prior year</span>
+          </div>
+        </div>
+        <div style="position:relative;width:100%;height:190px;padding-top:8px"><canvas id="mc-cum-lines"></canvas></div>
+        <!-- Variance section with its own label -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0 4px;border-top:2px dashed var(--border2);margin-top:4px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">Cumulative variance vs plan</span>
+          <div style="font-size:10px;color:var(--text3)">
+            <span style="color:${cGreen};font-weight:700">▼ under budget</span>
+            &nbsp;&nbsp;
+            <span style="color:${cRed};font-weight:700">▲ over budget</span>
+          </div>
+        </div>
+        <div style="position:relative;width:100%;height:75px"><canvas id="mc-cum-variance"></canvas></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="table-card">
+    <div class="table-header"><div class="chart-title">Monthly breakdown — ${yr} YTD</div></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th style="text-align:left">Month</th><th>Actual</th><th>Plan (pro-rated)</th><th>vs Plan $</th><th>vs Plan %</th><th>Prior year</th><th>vs PY $</th></tr></thead>
+      <tbody>${mRows.map(r=>`<tr><td>${r.l}</td><td>${fmtF(r.a)}</td><td>${fmtF(r.p)}</td><td>${vc2(r.vP)}</td><td>${pc2(r.vPP)}</td><td>${fmtF(r.py)}</td><td>${vc2(r.vL)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td>YTD Total</td><td>${fmtF(ytdAct)}</td><td>${fmtF(ytdPlan)}</td><td>${vc2(ytdVsP)}</td><td>${pc2(ytdVsP&&ytdPlan?ytdVsP/ytdPlan:null)}</td><td>${fmtF(ytdLY)}</td><td>${vc2(ytdVsLY)}</td></tr></tfoot>
+    </table></div>
+  </div>
+  <p class="note">* Current month pro-rated through day ${day}. Green = favorable. Red = unfavorable.</p>
+  <div id="audit-section"></div>
+  <div id="diag-panel" style="margin-top:12px"></div>`;
+
+  // Build audit: per-month row count + exact sum for current year
+  const auditByMonth = {};
+  for(let m=0;m<12;m++) auditByMonth[m]={rows:0,sum:0};
+  act26.forEach(r=>{
+    const m=r.date.getMonth();
+    auditByMonth[m].rows++;
+    auditByMonth[m].sum+=r.amt;
+  });
+  const auditRows = Object.entries(auditByMonth)
+    .filter(([,v])=>v.rows>0)
+    .map(([m,v])=>`<tr>
+      <td style="text-align:left">${MO[m]} ${yr}</td>
+      <td>${v.rows}</td>
+      <td>$${v.sum.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr>`).join('');
+  const auditTotal = act26.reduce((s,r)=>s+r.amt,0);
+  const auditRowTotal = act26.length;
+
+  document.getElementById('audit-section').innerHTML = `
+  <div class="hr"></div>
+  <div class="sec-label" style="margin-top:1rem">Data audit — ${yr} row counts &amp; exact sums</div>
+  <div class="table-card"><div class="table-wrap"><table>
+    <thead><tr>
+      <th style="text-align:left">Month</th>
+      <th>Rows counted</th>
+      <th>Sum of ${aAC}</th>
+    </tr></thead>
+    <tbody>${auditRows}</tbody>
+    <tfoot><tr>
+      <td style="text-align:left">YTD Total</td>
+      <td>${auditRowTotal}</td>
+      <td>$${auditTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr></tfoot>
+  </table></div></div>
+  <p class="note">
+    Total rows loaded (all years): ${totalRawRows.toLocaleString()} · 
+    date col: "${aDC}" · amount col: "${aAC}" · 
+    last record: ${MO[last.getMonth()]} ${last.getDate()}, ${last.getFullYear()} ·
+    ${new Date().toLocaleString()}
+  </p>`;
+
+  const today2=new Date();
+  const daysSinceLastRecord=Math.round((today2-last)/(1000*60*60*24));
+  const isTruncated=daysSinceLastRecord>45;
+  const truncWarning=isTruncated?`
+  <div style="background:var(--red-bg);border:1px solid var(--red);border-radius:var(--radius);padding:12px 16px;margin-bottom:1rem;font-size:12px;color:var(--red)">
+    <strong>⚠ Data truncation detected</strong> — last record loaded is ${MO[last.getMonth()]} ${last.getDate()}, ${last.getFullYear()} (${daysSinceLastRecord} days ago).
+    Google Sheets published CSV caps at ~5,000–10,000 rows. Your sheet has ${totalRawRows.toLocaleString()} rows loaded but more exist, cutting off recent data.<br><br>
+    <strong>Fix:</strong> In your Fleetio Google Sheet, delete or archive rows before Jan 1, 2025. Keeping only 2025–present data will stay well under the row limit and ensure current-year numbers are accurate.
+  </div>`:'';
+
+  app.innerHTML = app.innerHTML.replace('__TRUNC_WARNING__', truncWarning);
+
+  if(window.Chart){
+    buildChart('mc-lines','mc-variance', chartLabels,chartActual,chartPlan,chartPY,chartVariance,cActual,cPlan,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+    buildChart('mc-cum-lines','mc-cum-variance', chartLabels,cumActual,cumPlan,cumPY,cumVariance,cActual,cPlan,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+  } else{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+    s.onload=()=>{
+      buildChart('mc-lines','mc-variance', chartLabels,chartActual,chartPlan,chartPY,chartVariance,cActual,cPlan,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+      buildChart('mc-cum-lines','mc-cum-variance', chartLabels,cumActual,cumPlan,cumPY,cumVariance,cActual,cPlan,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+    };
+    s.onerror=()=>document.querySelectorAll('.chart-card').forEach(c=>c.style.display='none');
+    document.head.appendChild(s);
+  }
+}
+
+let chartInst2 = null, chartInst3 = null, chartInst4 = null;
+
+function buildChart(lineId, varId, labels, actual, plan, py, variance,
+                    cActual, cPlan, cPY, cGreen, cRed, cGreenB, cRedB, cT, cG){
+
+  // Destroy any existing charts on these canvases
+  [lineId, varId].forEach(id=>{
+    const existing = Chart.getChart(id);
+    if(existing) existing.destroy();
+  });
+
+  const elL = document.getElementById(lineId);
+  const elV = document.getElementById(varId);
+  if(!elL||!elV) return;
+
+  const vBarFill   = variance.map(v=> v===null?'rgba(0,0,0,0)': v<=0?cGreenB:cRedB);
+  const vBarBorder = variance.map(v=> v===null?'rgba(0,0,0,0)': v<=0?cGreen:cRed);
+
+  const sharedPad = {left:6, right:6, top:4, bottom:0};
+
+  // ── Line chart ──
+  new Chart(elL,{
+    type:'line',
+    data:{labels, datasets:[
+      {label:'Actual',     data:actual, borderColor:cActual,backgroundColor:'transparent',
+       borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#fff',
+       pointBorderColor:cActual, pointBorderWidth:2, tension:.3},
+      {label:'Plan',       data:plan,   borderColor:cPlan,  backgroundColor:'transparent',
+       borderWidth:1.5, borderDash:[6,4], pointRadius:3,
+       pointBackgroundColor:cPlan, tension:.3},
+      {label:'Prior year', data:py,     borderColor:cPY,    backgroundColor:'transparent',
+       borderWidth:1.5, borderDash:[3,3], pointRadius:2,
+       pointBackgroundColor:cPY, tension:.3}
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      layout:{padding:sharedPad},
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{
+          label:c=>c.parsed.y==null?null:
+            ` ${c.dataset.label}: $${c.parsed.y.toLocaleString(undefined,{maximumFractionDigits:0})}`
+        }}
+      },
+      scales:{
+        x:{display:false, grid:{display:false}},
+        y:{grid:{color:cG}, ticks:{color:cT,font:{size:10},
+           callback:v=>'$'+v.toLocaleString()}, beginAtZero:true}
+      }
+    }
+  });
+
+  // ── Variance bar chart (same x-axis width via shared padding) ──
+  new Chart(elV,{
+    type:'bar',
+    data:{labels, datasets:[{
+      label:'vs Plan',
+      data:variance,
+      backgroundColor:vBarFill,
+      borderColor:vBarBorder,
+      borderWidth:1,
+      borderRadius:2
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      layout:{padding:sharedPad},
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{
+          label:c=>{
+            if(c.parsed.y===null) return null;
+            const v=c.parsed.y;
+            return ` vs Plan: ${v<=0?'▼ Under':'▲ Over'} $${Math.abs(Math.round(v)).toLocaleString()}`;
+          }
+        }}
+      },
+      scales:{
+        x:{grid:{color:cG}, ticks:{color:cT,font:{size:11},maxRotation:0}},
+        y:{grid:{color:cG, drawBorder:false}, ticks:{color:cT,font:{size:9},
+           callback:v=>v===0?'0':(v>0?'+':'')+
+             (Math.abs(v)>=1000?'$'+(v/1000).toFixed(0)+'K':'$'+Math.abs(v).toFixed(0))},
+           beginAtZero:false}
+      }
+    }
+  });
+}
+
+function showErr(title,detail,rows1,rows2){
+  let h=`<div class="state-box"><div class="err-box"><div class="err-title">${title}</div><div class="err-detail">${detail}</div></div>`;
+  if(rows1) h+=`<div class="diag-box"><div class="diag-title">Plan — first 3 rows</div><pre style="font-size:10px;font-family:var(--mono);white-space:pre-wrap;word-break:break-word;line-height:1.5;max-height:160px;overflow:auto">${JSON.stringify(rows1,null,2)}</pre></div>`;
+  if(rows2) h+=`<div class="diag-box"><div class="diag-title">Actuals — first 3 rows</div><pre style="font-size:10px;font-family:var(--mono);white-space:pre-wrap;word-break:break-word;line-height:1.5;max-height:160px;overflow:auto">${JSON.stringify(rows2,null,2)}</pre></div>`;
+  h+=`<button class="btn primary" onclick="initDash()">↻ Try again</button></div>`;
+  document.getElementById('app').innerHTML=h;
+}
+
+async function initDash(){
+  Object.keys(diagState).forEach(k=>delete diagState[k]);
+  document.getElementById('app').innerHTML=`<div class="state-box"><div class="spinner"></div><div class="state-title">Loading your data…</div><div class="state-sub">Connecting to Google Sheets</div><div id="diag-panel"></div></div>`;
+  try{
+    const [planR,actR]=await Promise.all([fetchCSV(PLAN_URL,'Plan'),fetchCSV(ACT_URL,'Actuals')]);
+    if(!planR.data.length) throw new Error('Plan CSV: no data rows. Fields: '+planR.fields.join(', '));
+    if(!actR.data.length)  throw new Error('Actuals CSV: no data rows. Fields: '+actR.fields.join(', '));
+    renderDash(planR,actR);
+  }catch(e){
+    document.getElementById('app').innerHTML=`<div class="state-box">
+      <div class="err-box"><div class="err-title">Could not load data</div><div class="err-detail">${e.message}</div></div>
+      <div class="diag-box"><div class="diag-title">What was tried</div>${
+        Object.entries(diagState).map(([k,v])=>`<div class="diag-row"><span class="${v.cls}" style="flex-shrink:0;width:14px">${v.cls==='ok'?'✓':v.cls==='fail'?'✗':'…'}</span><span><b>${k}:</b> <span style="color:var(--text2)">${v.msg}</span></span></div>`).join('')
+      }</div>
+      <div class="state-sub">Both direct fetch and CORS proxy failed.<br>Check the sheets are published: <b>File → Share → Publish to web → CSV</b></div>
+      <button class="btn primary" onclick="initDash()">↻ Try again</button>
+    </div>`;
+  }
+}
+
+initDash();
+</script>
+</body>
+</html>
