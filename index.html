@@ -42,12 +42,12 @@
   @media(max-width:900px){.periods-row{grid-template-columns:1fr}}
   .period-block{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
   .period-block .section-header{border-radius:0}
-  .period-inner{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
-  .kpi-card{padding:14px 16px;border-right:1px solid var(--border)}
+  .period-inner{display:grid;grid-template-columns:repeat(5,1fr);gap:0}
+  .kpi-card{padding:14px 16px;border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
   .kpi-card:last-child{border-right:none}
   .kpi-label{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
   .kpi-value{font-size:22px;font-weight:700;letter-spacing:-.5px;line-height:1;color:var(--text)}
-  .kpi-sub{font-size:11px;margin-top:5px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+  .kpi-sub{font-size:11px;margin-top:5px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap}
   .sub-label{color:var(--text3);font-size:10px}
   .pill{display:inline-flex;align-items:center;font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px}
   .pill.fav{background:var(--green-bg);color:var(--green)}
@@ -151,7 +151,7 @@ async function rawFetch(url) {
   }
 }
 
-// Key strategy: fetch ONLY the two columns we need (date + amount).
+// Key strategy: fetch ONLY the columns we need (date + amount + optional extras).
 // A single-column CSV is tiny (~100KB for 9000+ rows) so Google imposes
 // no row limit. This scales indefinitely as the sheet grows.
 async function fetchCSV(url, label) {
@@ -185,31 +185,36 @@ async function fetchCSV(url, label) {
     ['parts_subtotal','sum of parts_subtotal','amount'],
     ['partssubtotal','parts','maintenance','maint','expense','cost','amt']
   );
+  // Optional extra columns (e.g. Target in plan file)
+  const tgtIdx = findIdx(['target'],['target','tgt','rolling']);
 
   if (dateIdx <= 0 || amtIdx <= 0)
     throw new Error(`${label}: columns not found (date=${dateIdx}, amt=${amtIdx}). Headers: ${allFields.join(' | ')}`);
 
   const dateField  = allFields[dateIdx - 1];
   const amtField   = allFields[amtIdx  - 1];
+  const tgtField   = tgtIdx > 0 ? allFields[tgtIdx - 1] : null;
   const dateLetter = colToLetter(dateIdx);
   const amtLetter  = colToLetter(amtIdx);
+  const tgtLetter  = tgtIdx > 0 ? colToLetter(tgtIdx) : null;
 
-  updateDiag(label, 'wait',
-    `Fetching col ${dateLetter} ("${dateField}") + col ${amtLetter} ("${amtField}") — all rows…`);
+  const fetchMsg = tgtField
+    ? `Fetching "${dateField}" (${dateLetter}), "${amtField}" (${amtLetter}), "${tgtField}" (${tgtLetter})…`
+    : `Fetching "${dateField}" (${dateLetter}), "${amtField}" (${amtLetter})…`;
+  updateDiag(label, 'wait', fetchMsg);
 
-  // Step 2: fetch just those two columns in parallel (no row limit on single columns)
-  let dateTxt, amtTxt;
-  try {
-    [dateTxt, amtTxt] = await Promise.all([
-      rawFetch(`${url}&range=${dateLetter}:${dateLetter}`),
-      rawFetch(`${url}&range=${amtLetter}:${amtLetter}`)
-    ]);
-  } catch(e) {
-    updateDiag(label,'fail',e.message);
-    throw new Error(`${label}: ${e.message}`);
-  }
+  // Step 2: fetch needed columns in parallel
+  const fetches = [
+    rawFetch(`${url}&range=${dateLetter}:${dateLetter}`),
+    rawFetch(`${url}&range=${amtLetter}:${amtLetter}`)
+  ];
+  if (tgtLetter) fetches.push(rawFetch(`${url}&range=${tgtLetter}:${tgtLetter}`));
 
-  // Step 3: parse single-column CSVs (each returns just that column, header in row 1)
+  let results;
+  try { results = await Promise.all(fetches); }
+  catch(e) { updateDiag(label,'fail',e.message); throw new Error(`${label}: ${e.message}`); }
+
+  // Step 3: parse single-column CSVs
   function parseSingleCol(txt) {
     return txt.trim().split(/\r?\n/).slice(1).map(line => {
       line = line.trim();
@@ -219,20 +224,27 @@ async function fetchCSV(url, label) {
     });
   }
 
-  const dateVals = parseSingleCol(dateTxt);
-  const amtVals  = parseSingleCol(amtTxt);
+  const dateVals = parseSingleCol(results[0]);
+  const amtVals  = parseSingleCol(results[1]);
+  const tgtVals  = tgtLetter ? parseSingleCol(results[2]) : null;
   const n = Math.min(dateVals.length, amtVals.length);
 
   // Step 4: zip into row objects, skip footer rows (Grand Total etc.)
+  const fields = [dateField, amtField];
+  if (tgtField) fields.push(tgtField);
+
   const data = [];
   for (let i = 0; i < n; i++) {
     const dv = dateVals[i];
     if (!dv || dv.toLowerCase().includes('grand total') || dv.toLowerCase() === 'total') continue;
-    data.push({ [dateField]: dv, [amtField]: amtVals[i] || '' });
+    const row = { [dateField]: dv, [amtField]: amtVals[i] || '' };
+    if (tgtField) row[tgtField] = tgtVals ? (tgtVals[i] || '') : '';
+    data.push(row);
   }
 
-  updateDiag(label, 'ok', `✓ ${data.length.toLocaleString()} rows`);
-  return { fields: [dateField, amtField], data };
+  const tgtMsg = tgtField ? `, target="${tgtField}" (${tgtLetter})` : ' (no Target column found)';
+  updateDiag(label, 'ok', `✓ ${data.length.toLocaleString()} rows — date="${dateField}", amt="${amtField}"${tgtMsg}`);
+  return { fields, data };
 }
 
 
@@ -337,6 +349,8 @@ function renderDash(planR, actR) {
     || pH.find(f=>f&&f.toLowerCase()==='totalamount')
     || pH.find(f=>f&&f.toLowerCase()==='total_amount')
     || detect(pH,['maintenance','maint','mex','budget','plan','amt','cost','expense','spend','value','total']);
+  const pTC = pH.find(f=>f&&f.toLowerCase()==='target')
+    || detect(pH,['target','tgt','rolling']);
   const aDC = aH.find(f=>f&&f.toLowerCase()==='date')
     || aH.find(f=>f&&f.toLowerCase()==='row labels')
     || aH.find(f=>f&&f.toLowerCase()==='rowlabels')
@@ -352,7 +366,11 @@ function renderDash(planR, actR) {
   if(!pDC||!pAC){showErr('Plan: cannot identify columns',`Headers: ${pH.join(' | ')}`,planR.data.slice(0,3),null);return;}
   if(!aDC||!aAC){showErr('Actuals: cannot identify columns',`Headers: ${aH.join(' | ')}`,null,actR.data.slice(0,3));return;}
 
-  const planRows=planR.data.map(r=>({date:pDate(r[pDC]),amt:pNum(r[pAC])})).filter(r=>r.date&&r.amt!==null).sort((a,b)=>a.date-b.date);
+  const planRows=planR.data.map(r=>({
+    date:pDate(r[pDC]),
+    amt:pNum(r[pAC]),
+    tgt:pTC?pNum(r[pTC]):null
+  })).filter(r=>r.date&&r.amt!==null).sort((a,b)=>a.date-b.date);
 
   // Keep every row with a valid date — treat missing/blank parts_subtotal as $0
   const actRows=actR.data
@@ -398,6 +416,13 @@ function renderDash(planR, actR) {
     if(yR.length===12) return yR[m]?.amt??null;
     return null;
   }
+  function mTarget(y,m){
+    const h=planRows.find(r=>r.date.getFullYear()===y&&r.date.getMonth()===m);
+    if(h&&h.tgt!=null) return h.tgt;
+    const yR=planRows.filter(r=>r.date.getFullYear()===y&&r.tgt!=null);
+    if(yR.length===12) return yR[m]?.tgt??null;
+    return null;
+  }
   const proMTD=(y,m,d)=>{const p=mPlan(y,m);return p?(p/daysIn(y,m))*d:null;};
   const proYTD=(y,m,d)=>{
     let t=0,any=false;
@@ -405,24 +430,34 @@ function renderDash(planR, actR) {
     const cp=mPlan(y,m);if(cp){t+=(cp/daysIn(y,m))*d;any=true;}
     return any?t:null;
   };
+  const proTgtMTD=(y,m,d)=>{const t=mTarget(y,m);return t?(t/daysIn(y,m))*d:null;};
+  const proTgtYTD=(y,m,d)=>{
+    let t=0,any=false;
+    for(let i=0;i<m;i++){const tg=mTarget(y,i);if(tg){t+=tg;any=true;}}
+    const ct=mTarget(y,m);if(ct){t+=(ct/daysIn(y,m))*d;any=true;}
+    return any?t:null;
+  };
 
-  const mtdPlan=proMTD(yr,mo,day),ytdPlan=proYTD(yr,mo,day);
+  const mtdPlan=proMTD(yr,mo,day),     ytdPlan=proYTD(yr,mo,day);
+  const mtdTgt =proTgtMTD(yr,mo,day),  ytdTgt =proTgtYTD(yr,mo,day);
   const mtdVsP=mtdPlan!==null?mtdAct-mtdPlan:null;
   const ytdVsP=ytdPlan!==null?ytdAct-ytdPlan:null;
+  const mtdVsT=mtdTgt!==null?mtdAct-mtdTgt:null;
+  const ytdVsT=ytdTgt!==null?ytdAct-ytdTgt:null;
   const mtdVsLY=mtdLY!==null?mtdAct-mtdLY:null;
   const ytdVsLY=ytdLY!==null?ytdAct-ytdLY:null;
 
   // Monthly chart data (Jan → current month)
-  const chartLabels=[], chartActual=[], chartPlan=[], chartPY=[];
+  const chartLabels=[], chartActual=[], chartPlan=[], chartPY=[], chartTgt=[];
   for(let m=0;m<=mo;m++){
     const isCur=m===mo;
     chartLabels.push(MO[m]);
     const mA=act26.filter(r=>r.date.getMonth()===m).reduce((s,r)=>s+r.amt,0);
     chartActual.push(parseFloat(mA.toFixed(2)));
-    const mp=mPlan(yr,m);
+    const mp=mPlan(yr,m), mt=mTarget(yr,m);
     const dU=isCur?day:daysIn(yr,m);
     chartPlan.push(mp?parseFloat(((mp/daysIn(yr,m))*dU).toFixed(2)):null);
-    // PY: same month in prior year, bounded by pyEnd
+    chartTgt.push(mt?parseFloat(((mt/daysIn(yr,m))*dU).toFixed(2)):null);
     const pyMoRows=actPY.filter(r=>r.date.getMonth()===m&&(!isCur||r.date.getDate()<=pyDay));
     chartPY.push(pyMoRows.length?parseFloat(pyMoRows.reduce((s,r)=>s+r.amt,0).toFixed(2)):null);
   }
@@ -432,20 +467,28 @@ function renderDash(planR, actR) {
     const isCur=m===mo;
     const mA=act26.filter(r=>r.date.getMonth()===m).reduce((s,r)=>s+r.amt,0);
     const dU=isCur?day:daysIn(yr,m);
-    const mp=mPlan(yr,m);
+    const mp=mPlan(yr,m), mt=mTarget(yr,m);
     const mPr=mp?(mp/daysIn(yr,m))*dU:null;
-    // PY: same month, bounded by pyEnd day for current month
+    const mTr=mt?(mt/daysIn(yr,m))*dU:null;
     const pyR=actPY.filter(r=>r.date.getMonth()===m&&(!isCur||r.date.getDate()<=pyDay));
     const mPY=pyR.length?pyR.reduce((s,r)=>s+r.amt,0):null;
-    mRows.push({l:MO[m]+(isCur?'*':''),a:mA,p:mPr,py:mPY,vP:mPr!==null?mA-mPr:null,vL:mPY!==null?mA-mPY:null,vPP:mPr!==null?(mA-mPr)/mPr:null});
+    mRows.push({
+      l:MO[m]+(isCur?'*':''), a:mA, p:mPr, tg:mTr, py:mPY,
+      vP:mPr!==null?mA-mPr:null,
+      vT:mTr!==null?mA-mTr:null,
+      vL:mPY!==null?mA-mPY:null,
+      vPP:mPr!==null?(mA-mPr)/mPr:null,
+      vTP:mTr!==null?(mA-mTr)/mTr:null
+    });
   }
 
   const pyEndStr=`${MO[pyEnd.getMonth()]} ${pyEnd.getDate()}, ${yr-1}`;
   const pyStartStr=`Jan 1, ${yr-1}`;
   const dark=window.matchMedia('(prefers-color-scheme:dark)').matches;
-  const cActual = dark?'#f1f5f9':'#0f2744';        // near-black / near-white — dominant
-  const cPlan   = dark?'#38bdf8':'#0369a1';         // sky blue — clearly different
-  const cPY     = dark?'#fb923c':'#c2410c';         // vivid orange — maximally distinct
+  const cActual = dark?'#f1f5f9':'#0f2744';
+  const cPlan   = dark?'#38bdf8':'#0369a1';
+  const cTgt    = dark?'#a78bfa':'#7c3aed';   // purple — rolling target
+  const cPY     = dark?'#fb923c':'#c2410c';
   const cGreen  = dark?'#22c55e':'#16a34a';
   const cRed    = dark?'#ef4444':'#dc2626';
   const cGreenB = dark?'rgba(34,197,94,.75)' :'rgba(22,163,74,.75)';
@@ -453,19 +496,24 @@ function renderDash(planR, actR) {
   const cT=dark?'#4a5266':'#9aa0b0', cG=dark?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)';
 
   // Cumulative chart data
-  const cumActual=[], cumPlan=[], cumPY=[], cumVariance=[];
-  let rA=0, rP=0;
+  const cumActual=[], cumPlan=[], cumTgt=[], cumPY=[], cumVariance=[], cumVarTgt=[];
+  let rA=0, rP=0, rTg=0;
   for(let i=0;i<chartActual.length;i++){
     rA+=chartActual[i]||0;
     cumActual.push(parseFloat(rA.toFixed(2)));
     if(chartPlan[i]!=null){ rP+=chartPlan[i]; cumPlan.push(parseFloat(rP.toFixed(2))); }
     else cumPlan.push(null);
-    const pySum = chartPY.slice(0,i+1).reduce((s,v)=>s+(v||0),0);
-    cumPY.push(chartPY[i]!=null ? parseFloat(pySum.toFixed(2)) : null);
-    cumVariance.push(cumPlan[i]!=null ? parseFloat((rA-rP).toFixed(2)) : null);
+    if(chartTgt[i]!=null){ rTg+=chartTgt[i]; cumTgt.push(parseFloat(rTg.toFixed(2))); }
+    else cumTgt.push(null);
+    const pySum=chartPY.slice(0,i+1).reduce((s,v)=>s+(v||0),0);
+    cumPY.push(chartPY[i]!=null?parseFloat(pySum.toFixed(2)):null);
+    cumVariance.push(cumPlan[i]!=null?parseFloat((rA-rP).toFixed(2)):null);
+    cumVarTgt.push(cumTgt[i]!=null?parseFloat((rA-rTg).toFixed(2)):null);
   }
-  const chartVariance = chartActual.map((a,i)=>
-    a!=null&&chartPlan[i]!=null ? parseFloat((a-chartPlan[i]).toFixed(2)) : null);
+  const chartVariance=chartActual.map((a,i)=>
+    a!=null&&chartPlan[i]!=null?parseFloat((a-chartPlan[i]).toFixed(2)):null);
+  const chartVarTgt=chartActual.map((a,i)=>
+    a!=null&&chartTgt[i]!=null?parseFloat((a-chartTgt[i]).toFixed(2)):null);
 
   app.innerHTML=`
   <div class="topbar">
@@ -489,7 +537,17 @@ function renderDash(planR, actR) {
           <div class="kpi-value">${fmtF(mtdAct)}</div>
           <div class="kpi-sub"><span class="sub-label">${day} days</span></div>
         </div>
+        <div class="kpi-card" style="border-left:2px solid var(--border2)">
+          <div class="kpi-label">Target (pro-rated)</div>
+          <div class="kpi-value">${mtdTgt!==null?fmtF(mtdTgt):'<span class="neu" style="font-size:14px">—</span>'}</div>
+          <div class="kpi-sub"><span class="sub-label">rolling target</span></div>
+        </div>
         <div class="kpi-card">
+          <div class="kpi-label">vs Target</div>
+          <div class="kpi-value ${vc(mtdVsT)}">${fmt(mtdVsT)}</div>
+          <div class="kpi-sub"><span class="sub-label">${fmtF(mtdTgt)} target</span></div>
+        </div>
+        <div class="kpi-card" style="border-left:2px solid var(--border2)">
           <div class="kpi-label">Plan (pro-rated)</div>
           <div class="kpi-value">${fmtF(mtdPlan)}</div>
           <div class="kpi-sub"><span class="sub-label">÷${totalDays}d × ${day}d</span></div>
@@ -497,12 +555,7 @@ function renderDash(planR, actR) {
         <div class="kpi-card">
           <div class="kpi-label">vs Plan</div>
           <div class="kpi-value ${vc(mtdVsP)}">${fmt(mtdVsP)}</div>
-          <div class="kpi-sub">${pillP(mtdVsP&&mtdPlan?mtdVsP/mtdPlan:null)} <span class="sub-label">of plan</span></div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">vs Prior year</div>
-          <div class="kpi-value ${vc(mtdVsLY)}">${fmt(mtdVsLY)}</div>
-          <div class="kpi-sub">${mtdLY!==null?pillP(mtdVsLY/mtdLY)+` <span class="sub-label">${MO[pyMo]} ${yr-1}</span>`:'<span class="neu">No PY data</span>'}</div>
+          <div class="kpi-sub"><span class="sub-label">${fmtF(mtdPlan)} plan</span></div>
         </div>
       </div>
     </div>
@@ -516,7 +569,17 @@ function renderDash(planR, actR) {
           <div class="kpi-value">${fmtF(ytdAct)}</div>
           <div class="kpi-sub"><span class="sub-label">Jan–${MO[mo]} ${day}</span></div>
         </div>
+        <div class="kpi-card" style="border-left:2px solid var(--border2)">
+          <div class="kpi-label">Target (pro-rated)</div>
+          <div class="kpi-value">${ytdTgt!==null?fmtF(ytdTgt):'<span class="neu" style="font-size:14px">—</span>'}</div>
+          <div class="kpi-sub"><span class="sub-label">rolling target</span></div>
+        </div>
         <div class="kpi-card">
+          <div class="kpi-label">vs Target</div>
+          <div class="kpi-value ${vc(ytdVsT)}">${fmt(ytdVsT)}</div>
+          <div class="kpi-sub"><span class="sub-label">${fmtF(ytdTgt)} target</span></div>
+        </div>
+        <div class="kpi-card" style="border-left:2px solid var(--border2)">
           <div class="kpi-label">Plan (pro-rated)</div>
           <div class="kpi-value">${fmtF(ytdPlan)}</div>
           <div class="kpi-sub"><span class="sub-label">Full months + partial ${MO[mo]}</span></div>
@@ -524,70 +587,63 @@ function renderDash(planR, actR) {
         <div class="kpi-card">
           <div class="kpi-label">vs Plan</div>
           <div class="kpi-value ${vc(ytdVsP)}">${fmt(ytdVsP)}</div>
-          <div class="kpi-sub">${pillP(ytdVsP&&ytdPlan?ytdVsP/ytdPlan:null)} <span class="sub-label">of plan</span></div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">vs Prior year</div>
-          <div class="kpi-value ${vc(ytdVsLY)}">${fmt(ytdVsLY)}</div>
-          <div class="kpi-sub">${ytdLY!==null?pillP(ytdVsLY/ytdLY)+` <span class="sub-label">${pyStartStr}–${pyEndStr}</span>`:'<span class="neu">No PY data</span>'}</div>
+          <div class="kpi-sub"><span class="sub-label">${fmtF(ytdPlan)} plan</span></div>
         </div>
       </div>
     </div>
   </div>
-
-
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
 
     <div class="chart-card">
       <div class="section-header">Monthly parts spend — ${yr} YTD</div>
       <div class="chart-inner">
-        <!-- Line chart with its own legend -->
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0 8px;border-bottom:1px solid var(--border)">
           <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">Spend by month</span>
           <div class="chart-legend">
             <span><span style="width:18px;height:2px;display:inline-block;background:${cActual};vertical-align:middle;border-radius:1px"></span>Actual</span>
+            <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cTgt};vertical-align:middle"></span>Target</span>
             <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cPlan};vertical-align:middle"></span>Plan</span>
             <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cPY};vertical-align:middle"></span>Prior year</span>
           </div>
         </div>
-        <div style="position:relative;width:100%;height:190px;padding-top:8px"><canvas id="mc-lines"></canvas></div>
-        <!-- Variance section with its own label -->
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0 4px;border-top:2px dashed var(--border2);margin-top:4px">
-          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">vs Plan variance</span>
-          <div style="font-size:10px;color:var(--text3)">
-            <span style="color:${cGreen};font-weight:700">▼ under budget</span>
-            &nbsp;&nbsp;
-            <span style="color:${cRed};font-weight:700">▲ over budget</span>
-          </div>
+        <div style="position:relative;width:100%;height:165px;padding-top:8px"><canvas id="mc-lines"></canvas></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0 3px;border-top:2px dashed var(--border2);margin-top:6px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">vs Target</span>
+          <div style="font-size:10px"><span style="color:${cGreen};font-weight:700">▼ under</span>&nbsp;&nbsp;<span style="color:${cRed};font-weight:700">▲ over</span></div>
         </div>
-        <div style="position:relative;width:100%;height:75px"><canvas id="mc-variance"></canvas></div>
+        <div style="position:relative;width:100%;height:60px"><canvas id="mc-var-tgt"></canvas></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0 3px;border-top:2px dashed var(--border2);margin-top:6px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">vs Plan</span>
+          <div style="font-size:10px"><span style="color:${cGreen};font-weight:700">▼ under</span>&nbsp;&nbsp;<span style="color:${cRed};font-weight:700">▲ over</span></div>
+        </div>
+        <div style="position:relative;width:100%;height:60px"><canvas id="mc-variance"></canvas></div>
       </div>
     </div>
 
     <div class="chart-card">
       <div class="section-header">Cumulative YTD parts spend — ${yr}</div>
       <div class="chart-inner">
-        <!-- Line chart with its own legend -->
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0 8px;border-bottom:1px solid var(--border)">
           <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">Running total</span>
           <div class="chart-legend">
             <span><span style="width:18px;height:2px;display:inline-block;background:${cActual};vertical-align:middle;border-radius:1px"></span>Actual</span>
+            <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cTgt};vertical-align:middle"></span>Target</span>
             <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cPlan};vertical-align:middle"></span>Plan</span>
             <span><span style="width:18px;height:0;display:inline-block;border-top:2px dashed ${cPY};vertical-align:middle"></span>Prior year</span>
           </div>
         </div>
-        <div style="position:relative;width:100%;height:190px;padding-top:8px"><canvas id="mc-cum-lines"></canvas></div>
-        <!-- Variance section with its own label -->
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0 4px;border-top:2px dashed var(--border2);margin-top:4px">
-          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">Cumulative variance vs plan</span>
-          <div style="font-size:10px;color:var(--text3)">
-            <span style="color:${cGreen};font-weight:700">▼ under budget</span>
-            &nbsp;&nbsp;
-            <span style="color:${cRed};font-weight:700">▲ over budget</span>
-          </div>
+        <div style="position:relative;width:100%;height:165px;padding-top:8px"><canvas id="mc-cum-lines"></canvas></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0 3px;border-top:2px dashed var(--border2);margin-top:6px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">vs Target (cumulative)</span>
+          <div style="font-size:10px"><span style="color:${cGreen};font-weight:700">▼ under</span>&nbsp;&nbsp;<span style="color:${cRed};font-weight:700">▲ over</span></div>
         </div>
-        <div style="position:relative;width:100%;height:75px"><canvas id="mc-cum-variance"></canvas></div>
+        <div style="position:relative;width:100%;height:60px"><canvas id="mc-cum-var-tgt"></canvas></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0 3px;border-top:2px dashed var(--border2);margin-top:6px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)">vs Plan (cumulative)</span>
+          <div style="font-size:10px"><span style="color:${cGreen};font-weight:700">▼ under</span>&nbsp;&nbsp;<span style="color:${cRed};font-weight:700">▲ over</span></div>
+        </div>
+        <div style="position:relative;width:100%;height:60px"><canvas id="mc-cum-variance"></canvas></div>
       </div>
     </div>
 
@@ -596,9 +652,9 @@ function renderDash(planR, actR) {
   <div class="table-card">
     <div class="table-header"><div class="chart-title">Monthly breakdown — ${yr} YTD</div></div>
     <div class="table-wrap"><table>
-      <thead><tr><th style="text-align:left">Month</th><th>Actual</th><th>Plan (pro-rated)</th><th>vs Plan $</th><th>vs Plan %</th><th>Prior year</th><th>vs PY $</th></tr></thead>
-      <tbody>${mRows.map(r=>`<tr><td>${r.l}</td><td>${fmtF(r.a)}</td><td>${fmtF(r.p)}</td><td>${vc2(r.vP)}</td><td>${pc2(r.vPP)}</td><td>${fmtF(r.py)}</td><td>${vc2(r.vL)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td>YTD Total</td><td>${fmtF(ytdAct)}</td><td>${fmtF(ytdPlan)}</td><td>${vc2(ytdVsP)}</td><td>${pc2(ytdVsP&&ytdPlan?ytdVsP/ytdPlan:null)}</td><td>${fmtF(ytdLY)}</td><td>${vc2(ytdVsLY)}</td></tr></tfoot>
+      <thead><tr><th style="text-align:left">Month</th><th>Actual</th><th>Target</th><th>vs Target $</th><th>vs Target %</th><th>Plan</th><th>vs Plan $</th><th>vs Plan %</th><th>Prior year</th><th>vs PY $</th></tr></thead>
+      <tbody>${mRows.map(r=>`<tr><td>${r.l}</td><td>${fmtF(r.a)}</td><td>${fmtF(r.tg)}</td><td>${vc2(r.vT)}</td><td>${pc2(r.vTP)}</td><td>${fmtF(r.p)}</td><td>${vc2(r.vP)}</td><td>${pc2(r.vPP)}</td><td>${fmtF(r.py)}</td><td>${vc2(r.vL)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td>YTD Total</td><td>${fmtF(ytdAct)}</td><td>${fmtF(ytdTgt)}</td><td>${vc2(ytdVsT)}</td><td>${pc2(ytdVsT&&ytdTgt?ytdVsT/ytdTgt:null)}</td><td>${fmtF(ytdPlan)}</td><td>${vc2(ytdVsP)}</td><td>${pc2(ytdVsP&&ytdPlan?ytdVsP/ytdPlan:null)}</td><td>${fmtF(ytdLY)}</td><td>${vc2(ytdVsLY)}</td></tr></tfoot>
     </table></div>
   </div>
   <p class="note">* Current month pro-rated through day ${day}. Green = favorable. Red = unfavorable.</p>
@@ -659,14 +715,18 @@ function renderDash(planR, actR) {
   app.innerHTML = app.innerHTML.replace('__TRUNC_WARNING__', truncWarning);
 
   if(window.Chart){
-    buildChart('mc-lines','mc-variance', chartLabels,chartActual,chartPlan,chartPY,chartVariance,cActual,cPlan,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
-    buildChart('mc-cum-lines','mc-cum-variance', chartLabels,cumActual,cumPlan,cumPY,cumVariance,cActual,cPlan,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+    buildChart('mc-lines','mc-variance', chartLabels,chartActual,chartPlan,chartTgt,chartPY,chartVariance,cActual,cPlan,cTgt,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+    buildChart('mc-cum-lines','mc-cum-variance', chartLabels,cumActual,cumPlan,cumTgt,cumPY,cumVariance,cActual,cPlan,cTgt,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+    buildVarChart('mc-var-tgt', chartLabels, chartVarTgt, cGreen,cRed,cGreenB,cRedB,cT,cG, true);
+    buildVarChart('mc-cum-var-tgt', chartLabels, cumVarTgt, cGreen,cRed,cGreenB,cRedB,cT,cG, false);
   } else{
     const s=document.createElement('script');
     s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
     s.onload=()=>{
-      buildChart('mc-lines','mc-variance', chartLabels,chartActual,chartPlan,chartPY,chartVariance,cActual,cPlan,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
-      buildChart('mc-cum-lines','mc-cum-variance', chartLabels,cumActual,cumPlan,cumPY,cumVariance,cActual,cPlan,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+      buildChart('mc-lines','mc-variance', chartLabels,chartActual,chartPlan,chartTgt,chartPY,chartVariance,cActual,cPlan,cTgt,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+      buildChart('mc-cum-lines','mc-cum-variance', chartLabels,cumActual,cumPlan,cumTgt,cumPY,cumVariance,cActual,cPlan,cTgt,cPY,cGreen,cRed,cGreenB,cRedB,cT,cG);
+      buildVarChart('mc-var-tgt', chartLabels, chartVarTgt, cGreen,cRed,cGreenB,cRedB,cT,cG, true);
+      buildVarChart('mc-cum-var-tgt', chartLabels, cumVarTgt, cGreen,cRed,cGreenB,cRedB,cT,cG, false);
     };
     s.onerror=()=>document.querySelectorAll('.chart-card').forEach(c=>c.style.display='none');
     document.head.appendChild(s);
@@ -675,10 +735,9 @@ function renderDash(planR, actR) {
 
 let chartInst2 = null, chartInst3 = null, chartInst4 = null;
 
-function buildChart(lineId, varId, labels, actual, plan, py, variance,
-                    cActual, cPlan, cPY, cGreen, cRed, cGreenB, cRedB, cT, cG){
+function buildChart(lineId, varId, labels, actual, plan, tgt, py, variance,
+                    cActual, cPlan, cTgt, cPY, cGreen, cRed, cGreenB, cRedB, cT, cG){
 
-  // Destroy any existing charts on these canvases
   [lineId, varId].forEach(id=>{
     const existing = Chart.getChart(id);
     if(existing) existing.destroy();
@@ -690,22 +749,20 @@ function buildChart(lineId, varId, labels, actual, plan, py, variance,
 
   const vBarFill   = variance.map(v=> v===null?'rgba(0,0,0,0)': v<=0?cGreenB:cRedB);
   const vBarBorder = variance.map(v=> v===null?'rgba(0,0,0,0)': v<=0?cGreen:cRed);
+  const sharedPad  = {left:6, right:6, top:4, bottom:0};
 
-  const sharedPad = {left:6, right:6, top:4, bottom:0};
-
-  // ── Line chart ──
   new Chart(elL,{
     type:'line',
     data:{labels, datasets:[
-      {label:'Actual',     data:actual, borderColor:cActual,backgroundColor:'transparent',
+      {label:'Actual',     data:actual, borderColor:cActual, backgroundColor:'transparent',
        borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#fff',
        pointBorderColor:cActual, pointBorderWidth:2, tension:.3},
-      {label:'Plan',       data:plan,   borderColor:cPlan,  backgroundColor:'transparent',
-       borderWidth:1.5, borderDash:[6,4], pointRadius:3,
-       pointBackgroundColor:cPlan, tension:.3},
-      {label:'Prior year', data:py,     borderColor:cPY,    backgroundColor:'transparent',
-       borderWidth:1.5, borderDash:[3,3], pointRadius:2,
-       pointBackgroundColor:cPY, tension:.3}
+      {label:'Plan',       data:plan,   borderColor:cPlan,   backgroundColor:'transparent',
+       borderWidth:1.5, borderDash:[6,4], pointRadius:3, pointBackgroundColor:cPlan, tension:.3},
+      {label:'Target',     data:tgt,    borderColor:cTgt,    backgroundColor:'transparent',
+       borderWidth:1.5, borderDash:[2,3], pointRadius:3, pointBackgroundColor:cTgt, tension:.3},
+      {label:'Prior year', data:py,     borderColor:cPY,     backgroundColor:'transparent',
+       borderWidth:1.5, borderDash:[3,3], pointRadius:2, pointBackgroundColor:cPY, tension:.3}
     ]},
     options:{
       responsive:true, maintainAspectRatio:false,
@@ -726,16 +783,12 @@ function buildChart(lineId, varId, labels, actual, plan, py, variance,
     }
   });
 
-  // ── Variance bar chart (same x-axis width via shared padding) ──
   new Chart(elV,{
     type:'bar',
     data:{labels, datasets:[{
-      label:'vs Plan',
-      data:variance,
-      backgroundColor:vBarFill,
-      borderColor:vBarBorder,
-      borderWidth:1,
-      borderRadius:2
+      label:'vs Plan', data:variance,
+      backgroundColor:vBarFill, borderColor:vBarBorder,
+      borderWidth:1, borderRadius:2
     }]},
     options:{
       responsive:true, maintainAspectRatio:false,
@@ -753,7 +806,43 @@ function buildChart(lineId, varId, labels, actual, plan, py, variance,
       },
       scales:{
         x:{grid:{color:cG}, ticks:{color:cT,font:{size:11},maxRotation:0}},
-        y:{grid:{color:cG, drawBorder:false}, ticks:{color:cT,font:{size:9},
+        y:{grid:{color:cG}, ticks:{color:cT,font:{size:9},
+           callback:v=>v===0?'0':(v>0?'+':'')+
+             (Math.abs(v)>=1000?'$'+(v/1000).toFixed(0)+'K':'$'+Math.abs(v).toFixed(0))},
+           beginAtZero:false}
+      }
+    }
+  });
+}
+
+// Standalone variance bar chart (reusable for both plan and target variants)
+function buildVarChart(id, labels, variance, cGreen,cRed,cGreenB,cRedB,cT,cG, showXLabels=true){
+  const existing = Chart.getChart(id);
+  if(existing) existing.destroy();
+  const el = document.getElementById(id);
+  if(!el) return;
+  const fill   = variance.map(v=>v===null?'rgba(0,0,0,0)':v<=0?cGreenB:cRedB);
+  const border = variance.map(v=>v===null?'rgba(0,0,0,0)':v<=0?cGreen:cRed);
+  new Chart(el,{
+    type:'bar',
+    data:{labels, datasets:[{
+      label:'Variance', data:variance,
+      backgroundColor:fill, borderColor:border, borderWidth:1, borderRadius:2
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      layout:{padding:{left:6,right:6,top:2,bottom:0}},
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{callbacks:{
+        label:c=>{
+          if(c.parsed.y===null) return null;
+          const v=c.parsed.y;
+          return ` ${v<=0?'▼ Under':'▲ Over'} $${Math.abs(Math.round(v)).toLocaleString()}`;
+        }
+      }}},
+      scales:{
+        x:{display:showXLabels, grid:{color:cG}, ticks:{color:cT,font:{size:11},maxRotation:0}},
+        y:{grid:{color:cG}, ticks:{color:cT,font:{size:9},
            callback:v=>v===0?'0':(v>0?'+':'')+
              (Math.abs(v)>=1000?'$'+(v/1000).toFixed(0)+'K':'$'+Math.abs(v).toFixed(0))},
            beginAtZero:false}
